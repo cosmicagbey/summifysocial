@@ -30,9 +30,25 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
+      - name: Ensure Release Keystore exists
+        run: |
+          if [ ! -f android/app/release.keystore ]; then
+            echo "Generating release keystore..."
+            keytool -genkeypair -v -keystore android/app/release.keystore -alias summify -keyalg RSA -keysize 2048 -validity 10000 -storepass summifykeystore -keypass summifykeystore -dname "CN=SummifySocial, OU=App, O=SummifySocial, L=City, ST=State, C=US"
+          fi
+
       - name: Build Signed Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --stacktrace
+        run: |
+          set +e
+          ./gradlew assembleRelease --stacktrace --no-daemon > build.log 2>&1
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "========== GRADLE BUILD FAILED =========="
+            tail -n 80 build.log
+            echo "========================================="
+            exit $STATUS
+          fi
 
       - name: Prepare APK for Release
         run: |
