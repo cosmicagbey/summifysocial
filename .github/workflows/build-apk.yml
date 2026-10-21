@@ -52,12 +52,15 @@ jobs:
       - name: Prepare APK for Release
         run: |
           mkdir -p build-output
-          APK_PATH=$(find android/app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          echo "Searching for built APKs:"
+          find . -name "*.apk"
+          APK_PATH=$(find . -name "*.apk" | grep -v "androidTest" | head -n 1)
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" build-output/SummifySocial.apk
-            echo "Found Release APK at $APK_PATH -> copied to build-output/SummifySocial.apk"
+            echo "Copied $APK_PATH -> build-output/SummifySocial.apk"
+            ls -lh build-output/SummifySocial.apk
           else
-            echo "Release APK not found!" && exit 1
+            echo "No APK found in repository!" && exit 1
           fi
 
       - name: Upload APK Artifact
