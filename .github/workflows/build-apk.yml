@@ -39,7 +39,15 @@ jobs:
 
       - name: Build Signed Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --stacktrace --info
+        run: |
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee gradle-build.log || (echo "=== GRADLE FAILURE LOG (LAST 100 LINES) ===" && tail -n 100 gradle-build.log && exit 1)
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: android/gradle-build.log
 
       - name: Prepare APK for Release
         run: |
