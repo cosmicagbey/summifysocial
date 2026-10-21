@@ -1,0 +1,73 @@
+name: Build & Release SummifySocial APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Ensure Release Keystore exists
+        run: |
+          if [ ! -f android/app/release.keystore ]; then
+            echo "Generating release keystore..."
+            keytool -genkey -v -keystore android/app/release.keystore -alias summify -keyalg RSA -keysize 2048 -validity 10000 -storepass summifykeystore -keypass summifykeystore -dname "CN=SummifySocial, OU=App, O=SummifySocial, L=City, ST=State, C=US"
+          fi
+
+      - name: Build Signed Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Prepare APK for Release
+        run: |
+          mkdir -p build-output
+          APK_PATH=$(find android/app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          if [ -n "$APK_PATH" ]; then
+            cp "$APK_PATH" build-output/SummifySocial.apk
+            echo "Found Release APK at $APK_PATH -> copied to build-output/SummifySocial.apk"
+          else
+            echo "Release APK not found!" && exit 1
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SummifySocial-APK
+          path: build-output/SummifySocial.apk
+          retention-days: 30
+
+      - name: Publish or Update 'latest' GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "SummifySocial v1.0.0 (Latest APK)"
+          body: |
+            ### 🌐 SummifySocial Android APK v1.0.0
+            - **Floating Quick-Verify Assistant:** 44dp floating bubble matching Bypass style — docks flush to screen edges, tucks 48% behind bezel, and dims down to 40% after 2.5s idle.
+            - **Auto Clipboard Ingestion:** Copy any link from X (Twitter), Facebook, TikTok, YouTube, Reddit, Instagram, or Threads — SummifySocial auto-detects and verifies the post with accuracy scores and cross-referenced sources.
+            - **AI Summarization & Multi-Source Corroboration:** Instantly explains claims with key bullet takeaways and source credibility checks.
+            - **Direct APK Download:** Tap **`SummifySocial.apk`** below to download and install on your Android device.
+          files: build-output/SummifySocial.apk
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

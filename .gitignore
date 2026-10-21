@@ -1,0 +1,33 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment & Local Data
+.env*.local
+.env
+data/summify_db.json
+
+# Android build outputs & caches
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/app/release.keystore
+android/.cxx/
+android/.idea/
+*.iml
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
