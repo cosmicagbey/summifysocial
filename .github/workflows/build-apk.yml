@@ -30,37 +30,20 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Ensure Release Keystore exists
-        run: |
-          if [ ! -f android/app/release.keystore ]; then
-            echo "Generating release keystore..."
-            keytool -genkeypair -v -keystore android/app/release.keystore -alias summify -keyalg RSA -keysize 2048 -validity 10000 -storepass summifykeystore -keypass summifykeystore -dname "CN=SummifySocial, OU=App, O=SummifySocial, L=City, ST=State, C=US"
-          fi
-
       - name: Build Signed Release APK
         working-directory: android
-        run: |
-          ./gradlew assembleRelease --stacktrace 2>&1 | tee gradle-build.log || (echo "=== GRADLE FAILURE LOG (LAST 100 LINES) ===" && tail -n 100 gradle-build.log && exit 1)
-
-      - name: Upload Build Log on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: android/gradle-build.log
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Prepare APK for Release
         run: |
           mkdir -p build-output
-          echo "Searching for built APKs:"
-          find . -name "*.apk"
-          APK_PATH=$(find . -name "*.apk" | grep -v "androidTest" | head -n 1)
+          APK_PATH=$(find android/ -name "*.apk" | grep -v "androidTest" | head -n 1)
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" build-output/SummifySocial.apk
-            echo "Copied $APK_PATH -> build-output/SummifySocial.apk"
+            echo "Successfully prepared APK: $APK_PATH -> build-output/SummifySocial.apk"
             ls -lh build-output/SummifySocial.apk
           else
-            echo "No APK found in repository!" && exit 1
+            echo "ERROR: No APK found!" && exit 1
           fi
 
       - name: Upload APK Artifact
