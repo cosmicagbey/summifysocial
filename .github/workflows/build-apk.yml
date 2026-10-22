@@ -47,15 +47,21 @@ jobs:
           if [ $BUILD_STATUS -ne 0 ]; then
             echo "::error::Gradle build failed with exit code $BUILD_STATUS"
             echo "=========================================="
-            echo "SEARCHING FOR ERRORS IN BUILD LOG:"
-            grep -C 5 -i "error:" ../build.log || true
-            grep -C 5 "What went wrong" ../build.log || true
-            echo "=========================================="
-            echo "LAST 120 LINES OF GRADLE BUILD:"
-            tail -n 120 ../build.log
+            echo "FULL GRADLE BUILD LOG:"
+            cat ../build.log
             echo "=========================================="
             exit $BUILD_STATUS
           fi
+
+      - name: Push Build Log to Repo for Diagnostics
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B diagnostics-log
+          git add -f build.log
+          git commit -m "ci: upload build.log for diagnostics" || true
+          git push -f origin diagnostics-log || true
 
       - name: Upload Build Log on Failure
         if: failure()
