@@ -27,6 +27,7 @@ interface FloatingWindowProps {
   onClose: () => void;
   onPostVerified?: (post: Post) => void;
   initialUrl?: string;
+  isStandalone?: boolean;
 }
 
 export const FloatingWindow: React.FC<FloatingWindowProps> = ({
@@ -34,6 +35,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
   onClose,
   onPostVerified,
   initialUrl,
+  isStandalone = false,
 }) => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -163,10 +165,26 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
     return { bg: 'bg-rose-500/15', border: 'border-rose-500/30', text: 'text-rose-400', badge: 'bg-rose-500 text-white' };
   };
 
+  const handleClose = () => {
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.closePanel) {
+      (window as any).AndroidBridge.closePanel();
+    } else {
+      onClose();
+    }
+  };
+
+  const handleMinimize = () => {
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.closePanel) {
+      (window as any).AndroidBridge.closePanel();
+    } else {
+      setIsMinimized(true);
+    }
+  };
+
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end animate-in slide-in-from-bottom-5 duration-300">
+    <div className={isStandalone ? "w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden select-none" : "fixed bottom-6 right-6 z-50 flex flex-col items-end animate-in slide-in-from-bottom-5 duration-300"}>
       {/* Minimized Bubble Pill */}
-      {isMinimized ? (
+      {!isStandalone && isMinimized ? (
         <div 
           onClick={() => setIsMinimized(false)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-slate-900/90 border border-blue-500/40 shadow-2xl backdrop-blur-md cursor-pointer hover:bg-slate-800 transition-all group"
@@ -179,88 +197,89 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
         </div>
       ) : (
         /* Expanded Floating Window Card */
-        <div className="w-[94vw] sm:w-[440px] bg-slate-950/98 border border-slate-800 rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden flex flex-col max-h-[88vh]">
+        <div className={isStandalone ? "w-full h-full flex flex-col bg-slate-950 overflow-hidden" : "w-[94vw] sm:w-[440px] bg-slate-950/98 border border-slate-800 rounded-2xl shadow-2xl backdrop-blur-xl overflow-hidden flex flex-col max-h-[88vh]"}>
           {/* Top Window Header */}
-          <div className="px-4 py-3 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+          <div className="px-4 py-2.5 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg overflow-hidden border border-slate-700 flex-shrink-0">
+              <div className="w-6 h-6 rounded-lg overflow-hidden border border-slate-700 flex-shrink-0">
                 <img src="/logo.jpg" alt="Logo" className="w-full h-full object-cover scale-110" />
               </div>
               <div>
-                <h4 className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                <h4 className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5 leading-none">
                   SummifySocial Verifier
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 </h4>
-                <p className="text-[10px] text-slate-400">Summarizes what is said & cross-checks facts</p>
+                <p className="text-[10px] text-slate-400 leading-tight mt-0.5">Live social summarizer & fact check</p>
               </div>
             </div>
 
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setIsMinimized(true)}
+                onClick={handleMinimize}
                 title="Minimize window"
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <Minimize2 className="w-3.5 h-3.5" />
               </button>
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 title="Close floating window"
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Quick Paste & Search Input */}
-          <div className="p-4 space-y-3 overflow-y-auto flex-1">
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span>Paste link from X, FB, TikTok, YouTube:</span>
-                <button
-                  type="button"
-                  onClick={handlePasteClipboard}
-                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold cursor-pointer active:scale-95 transition-transform"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>{copiedNotification ? 'Pasted!' : 'Paste from Clipboard'}</span>
-                </button>
-              </div>
+          {/* Quick Paste & Search Input - PINNED AT TOP */}
+          <div className="p-3 bg-slate-950/90 border-b border-slate-800/80 flex-shrink-0 space-y-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span className="truncate">Paste link from X, FB, TikTok, YouTube:</span>
+              <button
+                type="button"
+                onClick={handlePasteClipboard}
+                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold cursor-pointer active:scale-95 transition-transform flex-shrink-0"
+              >
+                <Copy className="w-3 h-3" />
+                <span>{copiedNotification ? 'Pasted!' : 'Paste from Clipboard'}</span>
+              </button>
+            </div>
 
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type="url"
-                    placeholder="https://x.com/... or facebook.com/..."
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
-                    className="w-full pl-3 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-                  />
-                </div>
-                <button
-                  onClick={() => handleVerify()}
-                  disabled={loading}
-                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors flex items-center gap-1 disabled:opacity-50 flex-shrink-0 active:scale-95"
-                >
-                  {loading ? (
-                    <Sparkles className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  )}
-                  <span>Verify</span>
-                </button>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="url"
+                  placeholder="https://x.com/... or youtube.com/..."
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
+                  className="w-full pl-3 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                />
               </div>
+              <button
+                onClick={() => handleVerify()}
+                disabled={loading}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors flex items-center gap-1 disabled:opacity-50 flex-shrink-0 active:scale-95"
+              >
+                {loading ? (
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowRight className="w-3.5 h-3.5" />
+                )}
+                <span>Verify</span>
+              </button>
             </div>
 
             {error && (
-              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+              <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] flex items-start gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 mt-0.5 flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
+          </div>
 
+          {/* Scrollable Results & Content */}
+          <div className="p-3.5 space-y-3.5 overflow-y-auto flex-1 overscroll-contain">
             {loading && (
               <div className="py-8 text-center space-y-2">
                 <div className="w-8 h-8 mx-auto border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />

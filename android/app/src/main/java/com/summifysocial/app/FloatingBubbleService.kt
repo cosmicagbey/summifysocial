@@ -427,45 +427,35 @@ class FloatingBubbleService : Service() {
         // Hide the bubble while panel is active
         bubbleRoot?.visibility = View.GONE
 
-        val panelWidth = dpToPx(380)
-        val panelHeight = dpToPx(520)
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        val panelWidth = (screenWidth * 0.94f).toInt().coerceAtMost(dpToPx(420))
+        val panelHeight = (screenHeight * 0.60f).toInt().coerceAtMost(dpToPx(520))
+
+        val backgroundDrawable = android.graphics.drawable.GradientDrawable().apply {
+            setColor(0xFF0A0F1D.toInt())
+            cornerRadius = dpToPx(16).toFloat()
+            setStroke(dpToPx(1), 0xFF1E293B.toInt())
+        }
 
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF0A0F1D.toInt())
+            background = backgroundDrawable
             elevation = 16f
             clipToOutline = true
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                    collapsePanel()
+                    true
+                } else {
+                    false
+                }
+            }
         }
 
-        // Header bar
-        val headerLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF0F172A.toInt())
-            setPadding(dpToPx(14), dpToPx(10), dpToPx(10), dpToPx(10))
-        }
-
-        val titleText = TextView(this).apply {
-            text = "SummifySocial Quick-Verify"
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 14f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val minimizeBtn = TextView(this).apply {
-            text = "✕"
-            setTextColor(0xFF94A3B8.toInt())
-            textSize = 18f
-            setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
-            setOnClickListener { collapsePanel() }
-        }
-
-        headerLayout.addView(titleText)
-        headerLayout.addView(minimizeBtn)
-        rootLayout.addView(headerLayout)
-
-        // Verification WebView
+        // Verification WebView (fills entire card; header with close/minimize is rendered within the web app)
         val wv = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
@@ -504,7 +494,8 @@ class FloatingBubbleService : Service() {
         webView = wv
 
         rootLayout.addView(wv, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
         ))
 
         val params = WindowManager.LayoutParams(
@@ -515,7 +506,10 @@ class FloatingBubbleService : Service() {
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = dpToPx(36)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
         }
 
         expandedView = rootLayout
@@ -607,6 +601,13 @@ class FloatingBubbleService : Service() {
                         wv.evaluateJavascript("if (window.onNativeClipboardCaptured) window.onNativeClipboardCaptured($quoted);", null)
                     }
                 }
+            }
+        }
+
+        @JavascriptInterface
+        fun closePanel() {
+            mainHandler.post {
+                collapsePanel()
             }
         }
     }
