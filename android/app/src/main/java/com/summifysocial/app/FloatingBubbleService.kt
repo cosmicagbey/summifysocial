@@ -11,6 +11,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
@@ -91,7 +92,13 @@ class FloatingBubbleService : Service() {
         clipboardManager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
 
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, buildNotification(), 0)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
 
         createBubbleView()
         registerClipboardListener()
@@ -229,7 +236,7 @@ class FloatingBubbleService : Service() {
                         lastBubbleY = params.y
                         try {
                             windowManager.updateViewLayout(view, params)
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {}
                     }
                     true
                 }
@@ -248,7 +255,7 @@ class FloatingBubbleService : Service() {
                                 lastBubbleX = params.x
                                 try {
                                     windowManager.updateViewLayout(view, params)
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {}
                             }
                             addListener(object : AnimatorListenerAdapter() {
                                 override fun onAnimationEnd(animation: Animator) {
@@ -274,14 +281,14 @@ class FloatingBubbleService : Service() {
             windowManager.addView(view, params)
             bubbleRoot = view
             scheduleIdleTimer()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
     }
 
     private fun removeBubbleView() {
         cancelIdleTimer()
         tuckAnimator?.cancel()
         bubbleRoot?.let {
-            try { windowManager.removeView(it) } catch (_: Exception) {}
+            try { windowManager.removeView(it) } catch (e: Exception) {}
         }
         bubbleRoot = null
     }
@@ -334,7 +341,7 @@ class FloatingBubbleService : Service() {
                 view.alpha = startAlpha + (targetAlpha - startAlpha) * fraction
                 try {
                     windowManager.updateViewLayout(view, params)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {}
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
@@ -378,7 +385,7 @@ class FloatingBubbleService : Service() {
                 view.alpha = startAlpha + (1.0f - startAlpha) * fraction
                 try {
                     windowManager.updateViewLayout(view, params)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {}
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
@@ -388,7 +395,7 @@ class FloatingBubbleService : Service() {
                     view.alpha = 1.0f
                     try {
                         windowManager.updateViewLayout(view, params)
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {}
                     onEnd?.invoke()
                 }
             })
@@ -504,7 +511,7 @@ class FloatingBubbleService : Service() {
         try {
             windowManager.addView(rootLayout, params)
             isExpanded = true
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
     }
 
     private fun collapsePanel() {
@@ -517,7 +524,7 @@ class FloatingBubbleService : Service() {
 
     private fun removeExpandedView() {
         expandedView?.let {
-            try { windowManager.removeView(it) } catch (_: Exception) {}
+            try { windowManager.removeView(it) } catch (e: Exception) {}
         }
         webView?.destroy()
         webView = null

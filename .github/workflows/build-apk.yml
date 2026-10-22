@@ -45,13 +45,24 @@ jobs:
           ./gradlew assembleRelease --stacktrace 2>&1 | tee ../build.log
           BUILD_STATUS=${PIPESTATUS[0]}
           if [ $BUILD_STATUS -ne 0 ]; then
-            echo "::error::Gradle build failed!"
+            echo "::error::Gradle build failed with exit code $BUILD_STATUS"
             echo "=========================================="
-            echo "LAST 60 LINES OF GRADLE BUILD:"
-            tail -n 60 ../build.log
+            echo "SEARCHING FOR ERRORS IN BUILD LOG:"
+            grep -C 5 -i "error:" ../build.log || true
+            grep -C 5 "What went wrong" ../build.log || true
+            echo "=========================================="
+            echo "LAST 120 LINES OF GRADLE BUILD:"
+            tail -n 120 ../build.log
             echo "=========================================="
             exit $BUILD_STATUS
           fi
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: build.log
 
       - name: Prepare APK for Release
         run: |
