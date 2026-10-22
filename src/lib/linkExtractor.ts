@@ -121,6 +121,31 @@ async function extractTwitterPost(url: string): Promise<ExtractedPostData | null
     console.warn('VxTwitter fallback error:', err);
   }
 
+  // 3. FxTwitter API fallback
+  try {
+    const fxUrl = `https://api.fxtwitter.com/status/${tweetId}`;
+    const res = await fetch(fxUrl, { next: { revalidate: 60 } });
+    if (res.ok) {
+      const data = await res.json();
+      const tweet = data.tweet;
+      if (tweet && tweet.text) {
+        return {
+          title: `Post by ${tweet.author?.name || 'X User'}`,
+          content: tweet.text,
+          authorName: tweet.author?.name || 'X Creator',
+          authorHandle: tweet.author?.screen_name ? `@${tweet.author.screen_name}` : '@x_user',
+          avatarUrl: tweet.author?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          mediaUrl: tweet.media?.photos?.[0]?.url || tweet.media?.videos?.[0]?.thumbnail_url || undefined,
+          platform: 'twitter',
+          publishedAt: tweet.created_at,
+          rawText: tweet.text,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('FxTwitter fallback error:', err);
+  }
+
   return null;
 }
 
@@ -438,26 +463,17 @@ export async function extractPostFromUrl(url: string): Promise<ExtractedPostData
     return extracted;
   }
 
-  // Fallback: If network / bot detection prevented full extraction, parse the URL slug
-  const urlParts = url.replace(/^https?:\/\//, '').split('/');
-  const domain = urlParts[0] || platform;
-  const slug = urlParts.slice(1).join(' ')
-    .replace(/[-_?&=]/g, ' ')
-    .replace(/\b(status|posts|videos|watch|shorts|p|comments)\b/gi, '')
-    .trim();
-
-  const title = slug.length > 5
-    ? slug.slice(0, 100)
-    : `Post on ${domain}`;
+  // If all extraction attempts failed to read post text, return clean empty object
+  const domain = url.replace(/^https?:\/\//, '').split('/')[0] || platform;
 
   return {
-    title,
-    content: `Content shared via ${domain}: "${title}". Evaluating circulating claims and context against primary reporting wire services.`,
+    title: `Post on ${domain}`,
+    content: '',
     authorName: `${platform.toUpperCase()} Creator`,
     authorHandle: `@${platform}`,
     avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
     platform,
-    rawText: title,
+    rawText: '',
     isLoginWalled: false,
   };
 }

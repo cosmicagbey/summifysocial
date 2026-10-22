@@ -99,21 +99,12 @@ async function searchLiveNews(query: string): Promise<Array<{ title: string; lin
 }
 
 /**
- * Searches accredited fact-checking outlets via Google News RSS (Snopes, PolitiFact, Reuters Fact Check, AP Fact Check).
- * Does not require an API key and catches viral claims fast.
- */
-async function searchDedicatedFactCheckRss(query: string): Promise<Array<{ title: string; link: string; source: string; pubDate: string }>> {
-  const factCheckQuery = `${query} ("fact check" OR site:snopes.com OR site:politifact.com OR site:factcheck.org OR site:reuters.com)`;
-  return searchLiveNews(factCheckQuery);
-}
-
-/**
  * Queries the official Google Fact Check Tools API (aggregates Snopes, PolitiFact, Reuters, AFP, AP, FullFact).
  * Active whenever GEMINI_API_KEY or GOOGLE_FACTCHECK_API_KEY is configured in the environment.
  */
-async function searchGoogleFactCheckApi(query: string): Promise<FactCheckEvidence[]> {
+async function searchGoogleFactCheckApi(query: string, rawText: string): Promise<FactCheckEvidence[]> {
   const apiKey = process.env.GOOGLE_FACTCHECK_API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) return [];
+  if (!apiKey || !query.trim()) return [];
 
   try {
     const url = `https://factchecktools.googleapis.com/v1alpha1/claims:search?query=${encodeURIComponent(query)}&key=${apiKey}`;
@@ -127,6 +118,9 @@ async function searchGoogleFactCheckApi(query: string): Promise<FactCheckEvidenc
 
     for (const claim of data.claims) {
       if (!claim.claimReview || !claim.claimReview.length) continue;
+      // Ensure fact check claim is relevant to the post
+      if (!isEvidenceRelevant(rawText, claim.text || '')) continue;
+
       for (const review of claim.claimReview) {
         const rating = (review.textualRating || '').toLowerCase();
         const publisher = review.publisher?.name || 'Accredited Fact Checker';
@@ -154,9 +148,36 @@ async function searchGoogleFactCheckApi(query: string): Promise<FactCheckEvidenc
 }
 
 /**
- * Extracts searchable keywords from a claim by stripping stop words and punctuation.
+ * Extracts named entities (people, churches, organizations, countries) and keywords from a claim.
+ * Avoids picking random filler words that trigger unrelated search results.
  */
-function extractSearchKeywords(text: string): string {
+function extractEntitiesAndKeywords(text: string): { query: string; keyEntities: string[] } {
+  const cleanForEntities = text
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/#\w+/g, '')
+    .replace(/\b(GO CHURCH EXPOS[EÉ]|EXPOS[EÉ]|BREAKING NEWS|BREAKING|URGENT|JUST IN|SHOCKING|WATCH|VIDEO|ALERT|THREAD|UPDATE)\b/gi, ' ')
+    .replace(/\b(Staff|Admin|Admin admits|Former pastor admits|Pastor admits|says|claims)\b/gi, ' ');
+
+  // 1. Find title-cased proper noun phrases (e.g., Dag Heward-Mills, Lighthouse Chapel, Donald Trump)
+  const entityMatches = cleanForEntities.match(/\b[A-Z][a-z0-9]+(?:-[A-Za-z0-9]+)?(?:\s+[A-Z][a-z0-9]+(?:-[A-Za-z0-9]+)?)*\b/g) || [];
+  const commonWords = new Set([
+    'the', 'this', 'that', 'former', 'pastor', 'church', 'devil', 'earth', 'human', 'being', 'form',
+    'admits', 'if', 'what', 'who', 'when', 'where', 'why', 'how', 'view', 'post', 'like', 'from'
+  ]);
+
+  const keyEntities = entityMatches.filter(e => {
+    const lower = e.toLowerCase().trim();
+    return !commonWords.has(lower) && e.trim().length > 3;
+  });
+
+  if (keyEntities.length > 0) {
+    return {
+      query: keyEntities.slice(0, 3).join(' '),
+      keyEntities,
+    };
+  }
+
+  // Fallback to primary significant words
   const stopWords = new Set([
     'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren',
     'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by',
@@ -167,114 +188,60 @@ function extractSearchKeywords(text: string): string {
     'ours', 'ourselves', 'out', 'over', 'own', 'same', 'she', 'should', 'so', 'some', 'such', 'than',
     'that', 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', 'this',
     'those', 'through', 'to', 'too', 'under', 'until', 'up', 'very', 'was', 'we', 'were', 'what',
-    'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'with', 'you', 'your', 'yours'
+    'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'with', 'you', 'your', 'yours', 'staff'
   ]);
 
-  const clean = text
+  const words = text
     .replace(/https?:\/\/\S+/gi, '')
     .replace(/[^a-zA-Z0-9\s]/g, ' ')
-    .toLowerCase();
-
-  const words = clean
+    .toLowerCase()
     .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.has(w));
+    .filter(w => w.length > 3 && !stopWords.has(w));
 
-  return words.slice(0, 6).join(' ');
+  const fallbackQuery = words.slice(0, 4).join(' ');
+  return {
+    query: fallbackQuery,
+    keyEntities: words.slice(0, 4),
+  };
 }
 
 /**
- * Real-time Fact-Checking & Corroboration Engine.
- * Evaluates claims against live Google News reports, fact-checking registries (Snopes, PolitiFact, Reuters),
- * and official fact-check tools.
+ * Validates whether a retrieved news article is actually relevant to the social claim.
+ * Drops junk articles (like random radio shows or generic news feeds) that don't match.
  */
-export async function factCheckContent(
-  text: string,
-  category: string,
-  authorHandle: string
-): Promise<FactCheckReport> {
-  const extractedClaim = extractMainClaim(text);
-  const keywords = extractSearchKeywords(extractedClaim || text);
+function isEvidenceRelevant(claimText: string, evidenceTitle: string, entities: string[] = []): boolean {
+  if (!evidenceTitle || !claimText) return false;
+  const lowerTitle = evidenceTitle.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  const titleWords = new Set(lowerTitle.split(/\s+/).filter(w => w.length > 3));
 
-  // Check for viral disinformation or sensationalist patterns
-  const hasHoaxTrigger = HOAX_PATTERNS.some(p => p.test(text));
-
-  // Run multi-tier parallel searches:
-  // Tier 1: Official Google Fact Check Tools API (Snopes, Reuters, PolitiFact)
-  // Tier 2: Dedicated Fact-Check RSS queries (free, zero API key)
-  // Tier 3: General Google News wire search (AP, Reuters, BBC, etc.)
-  const [googleFactChecks, dedicatedFactCheckNews, liveNews] = await Promise.all([
-    searchGoogleFactCheckApi(keywords),
-    searchDedicatedFactCheckRss(keywords),
-    searchLiveNews(keywords),
-  ]);
-
-  const evidenceList: FactCheckEvidence[] = [...googleFactChecks];
-  let isRefuted = hasHoaxTrigger || googleFactChecks.some(e => e.stance === 'refutes');
-  let isExplicitlyVerified = googleFactChecks.some(e => e.stance === 'corroborates');
-  let corroborationCount = isExplicitlyVerified ? 2 : 0;
-
-  // Process dedicated fact-check articles from Snopes / PolitiFact / Reuters RSS
-  for (const item of dedicatedFactCheckNews) {
-    const lowerTitle = item.title.toLowerCase();
-    const sourceLower = item.source.toLowerCase();
-    const isDebunk = DEBUNK_KEYWORDS.some(kw => lowerTitle.includes(kw));
-
-    // Avoid duplicate links
-    if (evidenceList.some(e => e.url === item.link)) continue;
-
-    const stance: 'corroborates' | 'refutes' | 'neutral' = isDebunk ? 'refutes' : 'corroborates';
-    if (isDebunk) {
-      isRefuted = true;
-    } else {
-      corroborationCount++;
-    }
-
-    evidenceList.push({
-      sourceName: item.source,
-      sourceDomain: sourceLower.replace(/[^a-z0-9]/g, '') + '.com',
-      url: item.link,
-      title: item.title,
-      snippet: `Fact-Check registry record from ${item.source}: "${item.title}". Published on ${item.pubDate || 'wire'}.`,
-      stance,
-      reliabilityScore: 97,
-    });
-  }
-
-  // Process live general news articles (Reuters, AP, BBC, etc.)
-  for (const item of liveNews) {
-    if (evidenceList.some(e => e.url === item.link)) continue;
-    if (evidenceList.length >= 6) break;
-
-    const lowerTitle = item.title.toLowerCase();
-    const sourceLower = item.source.toLowerCase();
-    const isDebunk = DEBUNK_KEYWORDS.some(kw => lowerTitle.includes(kw));
-
-    let stance: 'corroborates' | 'refutes' | 'neutral' = 'corroborates';
-    if (isDebunk || hasHoaxTrigger) {
-      stance = 'refutes';
-      isRefuted = true;
-    } else {
-      corroborationCount++;
-    }
-
-    let reliability = 88;
-    for (const [outlet, score] of Object.entries(REPUTABLE_OUTLETS)) {
-      if (sourceLower.includes(outlet)) {
-        reliability = score;
-        break;
+  // 1. Check if any named entity matches directly in the headline
+  for (const entity of entities) {
+    const parts = entity.toLowerCase().split(/\s+/).filter(p => p.length > 3);
+    for (const part of parts) {
+      if (titleWords.has(part) || lowerTitle.includes(part)) {
+        return true;
       }
     }
-
-    evidenceList.push({
-      sourceName: item.source,
-      sourceDomain: sourceLower.replace(/[^a-z0-9]/g, '') + '.com',
-      url: item.link,
-      title: item.title,
-      snippet: `Published on ${item.pubDate || 'wire'}: "${item.title}". Cross-checked against real-time reporting feed.`,
-      stance,
-      reliabilityScore: reliability,
-    });
   }
+
+  // 2. Check keyword overlap
+  const claimWords = claimText
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 3);
+
+  let matchCount = 0;
+  for (const w of claimWords) {
+    if (titleWords.has(w)) {
+      matchCount++;
+    }
+  }
+
+  // Must match at least 2 significant words or 1 unique long entity (>= 6 chars)
+  const hasStrongEntity = claimWords.some(w => w.length >= 6 && titleWords.has(w));
+  return matchCount >= 2 || hasStrongEntity;
+}
 
 /**
  * Detects whether a post is a personal statement, opinion, feeling, or individual anecdote
@@ -310,24 +277,111 @@ function isPersonalOpinionOrStatement(text: string): boolean {
     /\bwhat do you guys think\b/i,
     /\bam i the only one\b/i,
     /\bhot take\b/i,
+    /\bif the devil\b/i,
+    /\bis like the devil\b/i,
+    /\bdevil is walking\b/i,
+    /\badmits\b/i,
   ];
 
   const hasPersonalIndicator = personalIndicators.some(pattern => pattern.test(lower));
 
-  const newsIndicators = [
-    /\b(president|senate|congress|parliament|minister|white house|pentagon|court|supreme court)\b/i,
-    /\b(reuters|associated press|bbc|cnn|bloomberg)\b/i,
+  const hardNewsIndicators = [
+    /\b(president|senate|congress|parliament|minister|white house|pentagon|supreme court)\b/i,
     /\b(confirmed dead|assassinated|arrested|signed bill|passed law|launched missile|exploded|earthquake)\b/i,
     /\b(emergency declared|who declares|fda approves|nasa announces)\b/i,
   ];
 
-  const hasNewsIndicator = newsIndicators.some(pattern => pattern.test(lower));
+  const hasHardNewsIndicator = hardNewsIndicators.some(pattern => pattern.test(lower));
 
-  return hasPersonalIndicator && !hasNewsIndicator;
+  return hasPersonalIndicator && !hasHardNewsIndicator;
 }
 
-  // Detect if the post is a personal opinion or subjective statement
+/**
+ * Real-time Fact-Checking & Corroboration Engine.
+ * Evaluates claims against live Google News reports, fact-checking registries, and official fact-check tools.
+ */
+export async function factCheckContent(
+  text: string,
+  category: string,
+  authorHandle: string
+): Promise<FactCheckReport> {
+  const extractedClaim = extractMainClaim(text);
+  const { query, keyEntities } = extractEntitiesAndKeywords(extractedClaim || text);
+
+  // 1. Detect if the post is a personal opinion, anecdote, or subjective statement
   const isOpinion = isPersonalOpinionOrStatement(text);
+
+  if (isOpinion) {
+    return {
+      accuracyScore: 92,
+      status: 'opinion',
+      verdictType: 'opinion',
+      verdict: 'Personal Statement / Subjective Opinion',
+      claimBreakdown: {
+        reason: 'This is an individual sharing a personal perspective, subjective opinion, or individual commentary on social media, not an objective news claim.',
+      },
+      extractedClaim,
+      analysis: `This post represents personal commentary or a subjective perspective shared on social media by ${authorHandle}. It reflects personal thoughts, feelings, or a personal statement rather than an objective news assertion. Because of its subjective nature, there is no factual news claim to verify or debunk.`,
+      evidence: [],
+      verifiedAt: new Date().toISOString(),
+    };
+  }
+
+  // Check for viral disinformation or sensationalist patterns
+  const hasHoaxTrigger = HOAX_PATTERNS.some(p => p.test(text));
+
+  // Run targeted search using proper extracted entities
+  const [googleFactChecks, liveNews] = await Promise.all([
+    searchGoogleFactCheckApi(query, text),
+    query ? searchLiveNews(query) : Promise.resolve([]),
+  ]);
+
+  const evidenceList: FactCheckEvidence[] = [...googleFactChecks];
+  let isRefuted = hasHoaxTrigger || googleFactChecks.some(e => e.stance === 'refutes');
+  let isExplicitlyVerified = googleFactChecks.some(e => e.stance === 'corroborates');
+  let corroborationCount = isExplicitlyVerified ? 2 : 0;
+
+  // Filter and process live general news articles (STRICT RELEVANCE CHECK)
+  for (const item of liveNews) {
+    if (evidenceList.some(e => e.url === item.link)) continue;
+
+    // Strict filter: Discard unrelated junk (e.g. CapRadio California politics)
+    if (!isEvidenceRelevant(text, item.title, keyEntities)) {
+      continue;
+    }
+
+    if (evidenceList.length >= 6) break;
+
+    const lowerTitle = item.title.toLowerCase();
+    const sourceLower = item.source.toLowerCase();
+    const isDebunk = DEBUNK_KEYWORDS.some(kw => lowerTitle.includes(kw));
+
+    let stance: 'corroborates' | 'refutes' | 'neutral' = 'corroborates';
+    if (isDebunk || hasHoaxTrigger) {
+      stance = 'refutes';
+      isRefuted = true;
+    } else {
+      corroborationCount++;
+    }
+
+    let reliability = 88;
+    for (const [outlet, score] of Object.entries(REPUTABLE_OUTLETS)) {
+      if (sourceLower.includes(outlet)) {
+        reliability = score;
+        break;
+      }
+    }
+
+    evidenceList.push({
+      sourceName: item.source,
+      sourceDomain: sourceLower.replace(/[^a-z0-9]/g, '') + '.com',
+      url: item.link,
+      title: item.title,
+      snippet: `Published on ${item.pubDate || 'wire'}: "${item.title}". Cross-checked against real-time reporting feed.`,
+      stance,
+      reliabilityScore: reliability,
+    });
+  }
 
   // Calculate score, Grok-style verdict, and reason breakdown
   let score = 50;
@@ -422,16 +476,8 @@ function isPersonalOpinionOrStatement(text: string): boolean {
       reason: 'No matching corroboration found in independent journalism wire feeds or official registries.',
     };
 
-    // Add general verification guidance evidence
-    evidenceList.push({
-      sourceName: 'SummifySocial Wire Monitor',
-      sourceDomain: 'summifysocial.app',
-      url: 'https://news.google.com',
-      title: 'Real-Time News Wire Index Check',
-      snippet: 'Automated search across AP, Reuters, Bloomberg, and regional news desks found 0 matching statements for this claim.',
-      stance: 'neutral',
-      reliabilityScore: 80,
-    });
+    // No relevant news evidence found
+    // Leave evidenceList empty so no unrelated sources are shown
   }
 
   return {
