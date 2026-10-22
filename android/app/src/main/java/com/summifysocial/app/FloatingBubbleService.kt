@@ -26,6 +26,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -34,6 +35,7 @@ import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 
 /**
  * FloatingBubbleService — provides a draggable floating bubble overlay
@@ -264,13 +266,19 @@ class FloatingBubbleService : Service() {
                             })
                             start()
                         }
-                    } else {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        // If tucked/dimmed, wake up & pop out smoothly, then expand verification panel
+                        // If tucked/dimmed, wake up & pop out smoothly, grab clipboard and expand verification panel
                         wakeAndUntuckBubble {
-                            expandPanel()
+                            ClipboardCaptureActivity.capture(this@FloatingBubbleService) { captured ->
+                                val trimmed = captured.trim()
+                                val urlCandidate = if (trimmed.isNotBlank() && (isSocialMediaUrl(trimmed) || trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
+                                    trimmed
+                                } else {
+                                    null
+                                }
+                                expandPanel(urlCandidate)
+                            }
                         }
-                    }
                     true
                 }
                 else -> false
@@ -482,6 +490,7 @@ class FloatingBubbleService : Service() {
                 }
             }
             webChromeClient = WebChromeClient()
+            addJavascriptInterface(AndroidBridge(this), "AndroidBridge")
 
             val targetUrl = if (urlToVerify != null) {
                 "$BASE_URL?url=${Uri.encode(urlToVerify)}"
@@ -567,9 +576,32 @@ class FloatingBubbleService : Service() {
         return SOCIAL_DOMAINS.any { domain -> trimmed.contains(domain) }
     }
 
-    // ────────────────────── Utility ──────────────────────
+    // ────────────────────── Native Bridge for WebView ──────────────────────
+    inner class AndroidBridge(private val wv: WebView) {
+        private val mainHandler = Handler(Looper.getMainLooper())
 
-    private fun dpToPx(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
+        @JavascriptInterface
+        fun getClipboardText(): String {
+            return try {
+                val clip = clipboardManager?.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    clip.getItemAt(0)?.text?.toString() ?: ""
+                } else ""
+            } catch (e: Exception) {
+                ""
+            }
+        }
+
+        @JavascriptInterface
+        fun requestClipboardPaste() {
+            mainHandler.post {
+                ClipboardCaptureActivity.capture(this@FloatingBubbleService) { text ->
+                    if (text.isNotBlank()) {
+                        val quoted = JSONObject.quote(text)
+                        wv.evaluateJavascript("if (window.onNativeClipboardCaptured) window.onNativeClipboardCaptured($quoted);", null)
+                    }
+                }
+            }
+        }
     }
 }

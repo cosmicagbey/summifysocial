@@ -67,7 +67,7 @@ export async function processAndIngestPost(
   mediaUrls: string[],
   originalUrl: string
 ): Promise<Post> {
-  const { summary, keyTakeaways, category } = summarizeContent(rawContent, author.category);
+  const { summary, keyTakeaways, category } = await summarizeContent(rawContent, author.category, { name: author.name, handle: author.handle });
   const factCheck = await factCheckContent(rawContent, category, author.handle);
 
   const newPost: Post = {

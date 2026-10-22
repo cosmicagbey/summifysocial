@@ -26,6 +26,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Invisible activity for focused clipboard capture on Android 10+ -->
+        <activity
+            android:name=".ClipboardCaptureActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:finishOnTaskLaunch="true" />
+
         <service
             android:name=".FloatingBubbleService"
             android:exported="false"

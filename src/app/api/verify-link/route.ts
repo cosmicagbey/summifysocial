@@ -1,72 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Platform, Post, Category } from '@/types';
-import { summarizeContent } from '@/lib/summarizer';
+import { extractPostFromUrl, detectPlatform } from '@/lib/linkExtractor';
+import { summarizeContent, detectCategory } from '@/lib/summarizer';
 import { factCheckContent } from '@/lib/factchecker';
 import { addPost } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
-
-function detectPlatformFromUrl(url: string): Platform {
-  const lower = url.toLowerCase();
-  if (lower.includes('twitter.com') || lower.includes('x.com')) return 'twitter';
-  if (lower.includes('facebook.com') || lower.includes('fb.watch') || lower.includes('fb.com')) return 'facebook';
-  if (lower.includes('tiktok.com')) return 'tiktok';
-  if (lower.includes('youtube.com') || lower.includes('youtu.be')) return 'youtube';
-  if (lower.includes('reddit.com')) return 'reddit';
-  return 'rss';
-}
-
-function extractSimulatedPostFromUrl(url: string, platform: Platform): {
-  authorName: string;
-  authorHandle: string;
-  category: Category;
-  content: string;
-  mediaUrl: string;
-} {
-  const lower = url.toLowerCase();
-
-  // Tech / AI detection in URL
-  if (lower.includes('apple') || lower.includes('iphone') || lower.includes('openai') || lower.includes('nvidia') || lower.includes('tech')) {
-    return {
-      authorName: platform === 'twitter' ? 'Tech Radar & Hardware' : 'Tech Insight Daily',
-      authorHandle: '@techinsider',
-      category: 'tech',
-      content: 'Major breakthrough reported in optical interconnect computing for frontier neural networks, cutting inference power consumption by 60% according to newly filed patent documentation.',
-      mediaUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1000&auto=format&fit=crop&q=80',
-    };
-  }
-
-  // Sports detection in URL
-  if (lower.includes('nba') || lower.includes('fifa') || lower.includes('football') || lower.includes('sports') || lower.includes('transfer')) {
-    return {
-      authorName: 'Global Sports Center',
-      authorHandle: '@globalsports',
-      category: 'sports',
-      content: 'Breaking: League officials and international federation representatives have officially ratified the 2027 cross-continental club showcase in Paris.',
-      mediaUrl: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=1000&auto=format&fit=crop&q=80',
-    };
-  }
-
-  // Science / Space detection
-  if (lower.includes('space') || lower.includes('nasa') || lower.includes('star') || lower.includes('science')) {
-    return {
-      authorName: 'Astro Science Watch',
-      authorHandle: '@astroscience',
-      category: 'science',
-      content: 'Spectroscopic analysis from deep space orbital observatories has corroborated significant carbon dioxide and water vapor atmospheric traces on candidate habitable exoplanets.',
-      mediaUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1000&auto=format&fit=crop&q=80',
-    };
-  }
-
-  // Default viral claim for generic social media links
-  return {
-    authorName: platform === 'tiktok' ? 'Trending Clips Today' : `${platform.toUpperCase()} Viral Hub`,
-    authorHandle: `@viral_${platform}`,
-    category: 'tech',
-    content: `Verified story linked from ${platform.toUpperCase()}: Circulating viral claims regarding newly announced technologies and global events have been retrieved and evaluated against primary journalism records.`,
-    mediaUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1000&auto=format&fit=crop&q=80',
-  };
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,40 +19,72 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const platform = url ? detectPlatformFromUrl(url) : 'twitter';
-    const simulated = extractSimulatedPostFromUrl(url || '', platform);
-    const contentToVerify = rawContent || simulated.content;
+    let postTitle = '';
+    let extractedContent = rawContent || '';
+    let authorName = 'Social Media Creator';
+    let authorHandle = '@creator';
+    let avatarUrl = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80';
+    let mediaUrl: string | undefined = undefined;
+    let platform: Platform = 'twitter';
+    let publishedAt: string | undefined = undefined;
 
-    const { summary, keyTakeaways, category } = summarizeContent(contentToVerify, simulated.category);
-    const factCheck = await factCheckContent(contentToVerify, category, simulated.authorHandle);
+    // 1. If a URL was provided, extract real live content from the target link
+    if (url && url.trim().startsWith('http')) {
+      const extracted = await extractPostFromUrl(url.trim());
+      platform = extracted.platform;
+      postTitle = extracted.title;
+      extractedContent = rawContent || extracted.content;
+      authorName = extracted.authorName;
+      authorHandle = extracted.authorHandle;
+      avatarUrl = extracted.avatarUrl;
+      mediaUrl = extracted.mediaUrl;
+      publishedAt = extracted.publishedAt;
+    } else {
+      platform = 'twitter';
+    }
+
+    const category = detectCategory(extractedContent);
+
+    // 2. Generate detailed AI summary of what the author/creator is saying + key takeaways
+    const { summary, keyTakeaways } = await summarizeContent(
+      extractedContent,
+      category,
+      { name: authorName, handle: authorHandle }
+    );
+
+    // 3. Real-time fact-check and live corroboration against news wire feeds
+    const factCheck = await factCheckContent(extractedContent, category, authorHandle);
 
     const post: Post = {
       id: `verify-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       platform,
       author: {
-        name: simulated.authorName,
-        handle: simulated.authorHandle,
-        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        name: authorName,
+        handle: authorHandle,
+        avatarUrl,
         verified: true,
-        followers: '850K',
       },
       category,
-      originalContent: contentToVerify,
+      originalContent: extractedContent,
       summary,
       keyTakeaways,
-      mediaUrls: [simulated.mediaUrl],
-      originalUrl: url || 'https://x.com/trending/post/10029',
-      publishedAt: new Date().toISOString(),
+      mediaUrls: mediaUrl ? [mediaUrl] : [],
+      originalUrl: url || 'https://x.com',
+      publishedAt: publishedAt || new Date().toISOString(),
       factCheck,
       engagement: {
-        likes: Math.floor(Math.random() * 8000) + 500,
-        shares: Math.floor(Math.random() * 2000) + 120,
-        comments: Math.floor(Math.random() * 600) + 40,
+        likes: Math.floor(Math.random() * 5000) + 120,
+        shares: Math.floor(Math.random() * 1200) + 40,
+        comments: Math.floor(Math.random() * 400) + 15,
       },
     };
 
     // Store in feed database
-    addPost(post);
+    try {
+      addPost(post);
+    } catch (e) {
+      console.warn('Could not persist to local store:', e);
+    }
 
     return NextResponse.json({
       success: true,
@@ -123,11 +94,15 @@ export async function POST(request: NextRequest) {
         verdict: factCheck.verdict,
         claim: factCheck.extractedClaim,
         summary,
+        keyTakeaways,
+        originalContent: extractedContent,
         evidenceCount: factCheck.evidence.length,
         sources: factCheck.evidence.map(e => ({
           name: e.sourceName,
           domain: e.sourceDomain,
           url: e.url,
+          title: e.title,
+          snippet: e.snippet,
           stance: e.stance,
           reliability: e.reliabilityScore,
         })),
@@ -136,7 +111,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error verifying link:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to verify link' },
+      { success: false, error: 'Failed to verify link. Please check the URL and try again.' },
       { status: 500 }
     );
   }

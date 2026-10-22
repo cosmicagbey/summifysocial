@@ -1,18 +1,24 @@
 package com.summifysocial.app
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -191,11 +197,42 @@ fun SummifyApp(
               }
             }
 
+            addJavascriptInterface(MainAndroidBridge(context, this), "AndroidBridge")
+
             loadUrl(url)
             onWebViewCreated(this)
           }
         }
       )
+    }
+  }
+}
+
+class MainAndroidBridge(private val context: Context, private val webView: WebView) {
+  private val mainHandler = Handler(Looper.getMainLooper())
+
+  @JavascriptInterface
+  fun getClipboardText(): String {
+    return try {
+      val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+      val clip = cm?.primaryClip
+      if (clip != null && clip.itemCount > 0) {
+        clip.getItemAt(0)?.text?.toString() ?: ""
+      } else ""
+    } catch (e: Exception) {
+      ""
+    }
+  }
+
+  @JavascriptInterface
+  fun requestClipboardPaste() {
+    mainHandler.post {
+      ClipboardCaptureActivity.capture(context) { text ->
+        if (text.isNotBlank()) {
+          val quoted = JSONObject.quote(text)
+          webView.evaluateJavascript("if (window.onNativeClipboardCaptured) window.onNativeClipboardCaptured($quoted);", null)
+        }
+      }
     }
   }
 }
