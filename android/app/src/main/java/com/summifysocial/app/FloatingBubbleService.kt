@@ -266,6 +266,7 @@ class FloatingBubbleService : Service() {
                             })
                             start()
                         }
+                    } else {
                         view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                         // If tucked/dimmed, wake up & pop out smoothly, grab clipboard and expand verification panel
                         wakeAndUntuckBubble {
@@ -279,6 +280,7 @@ class FloatingBubbleService : Service() {
                                 expandPanel(urlCandidate)
                             }
                         }
+                    }
                     true
                 }
                 else -> false
@@ -574,6 +576,10 @@ class FloatingBubbleService : Service() {
         val trimmed = text.trim().lowercase()
         if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false
         return SOCIAL_DOMAINS.any { domain -> trimmed.contains(domain) }
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 
     // ────────────────────── Native Bridge for WebView ──────────────────────
