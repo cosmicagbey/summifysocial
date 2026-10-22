@@ -10,6 +10,38 @@ export interface ExtractedPostData {
   platform: Platform;
   publishedAt?: string;
   rawText?: string;
+  isLoginWalled?: boolean;
+}
+
+/**
+ * Detects whether extracted text or HTML is an authentication / login prompt
+ * rather than genuine public social post content.
+ */
+export function isLoginWall(text?: string, title?: string): boolean {
+  if (!text && !title) return false;
+  const combined = `${title || ''} ${text || ''}`.toLowerCase();
+
+  const loginWallSignatures = [
+    'log into facebook',
+    'log in to facebook',
+    'facebook - log in',
+    'log in or sign up',
+    'sign up for facebook',
+    'create new account',
+    'you must log in to continue',
+    'forgot password',
+    'explore the things you love',
+    'join facebook or log in',
+    'log into your facebook account',
+    'see more of .* on facebook',
+    'sign in to x',
+    'log in to twitter',
+    'sign in - google accounts',
+    'login • instagram',
+    'join instagram to see',
+  ];
+
+  return loginWallSignatures.some(sig => combined.includes(sig));
 }
 
 export function detectPlatform(url: string): Platform {
@@ -158,6 +190,94 @@ async function extractRedditPost(url: string): Promise<ExtractedPostData | null>
 }
 
 /**
+ * Extracts Facebook post content using crawler user-agents (which return OpenGraph
+ * metadata without the interactive JavaScript login wall) and detects auth walls.
+ */
+async function extractFacebookPost(url: string): Promise<ExtractedPostData | null> {
+  const crawlerAgents = [
+    'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    'Twitterbot/1.0',
+    'WhatsApp/2.21.12.21 A',
+  ];
+
+  for (const userAgent of crawlerAgents) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': userAgent,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        redirect: 'follow',
+        next: { revalidate: 60 },
+      });
+
+      if (res.ok) {
+        const html = await res.text();
+
+        const getMeta = (prop: string): string => {
+          const match = html.match(new RegExp(`<meta[^>]*(?:property|name)=["'](?:og:|twitter:)?${prop}["'][^>]*content=["']([^"']*)["']`, 'i')) ||
+                        html.match(new RegExp(`<meta[^>]*content=["']([^"']*)["'][^>]*(?:property|name)=["'](?:og:|twitter:)?${prop}["']`, 'i'));
+          return match ? match[1].trim() : '';
+        };
+
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const title = getMeta('title') || (titleMatch ? titleMatch[1].trim() : '');
+        const description = getMeta('description');
+        const image = getMeta('image');
+        const author = getMeta('author') || getMeta('site_name') || 'Facebook User';
+
+        // Check if Facebook returned an auth wall or login screen
+        if (isLoginWall(description, title) || isLoginWall(html.slice(0, 1500))) {
+          return {
+            title: 'Facebook Post (Login Required)',
+            content: '',
+            authorName: 'Facebook',
+            authorHandle: '@facebook',
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            platform: 'facebook',
+            isLoginWalled: true,
+          };
+        }
+
+        if (description && description.length > 15 && !description.startsWith('Log into Facebook')) {
+          const cleanDesc = description
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'");
+
+          return {
+            title: title || 'Facebook Post',
+            content: cleanDesc,
+            authorName: author || 'Facebook Creator',
+            authorHandle: `@${(author || 'facebook').toLowerCase().replace(/[^a-z0-9_]/g, '')}`,
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            mediaUrl: image || undefined,
+            platform: 'facebook',
+            rawText: cleanDesc,
+            isLoginWalled: false,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Facebook extraction attempt failed:', err);
+    }
+  }
+
+  return {
+    title: 'Facebook Post (Login Required)',
+    content: '',
+    authorName: 'Facebook Creator',
+    authorHandle: '@facebook',
+    avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    platform: 'facebook',
+    isLoginWalled: true,
+  };
+}
+
+/**
  * Extracts general web article or social post (Facebook, TikTok, Instagram, Web)
  * using HTML meta tags (OpenGraph, Twitter, schema.org) and Jina Reader fallback.
  */
@@ -190,6 +310,19 @@ async function extractWebOrSocialPost(url: string, platform: Platform): Promise<
       const image = getMeta('image');
       const author = getMeta('author') || getMeta('creator') || getMeta('site_name');
 
+      // Check for login wall
+      if (isLoginWall(description, title) || isLoginWall(html.slice(0, 1500))) {
+        return {
+          title: `${platform.toUpperCase()} Post (Login Required)`,
+          content: '',
+          authorName: `${platform.toUpperCase()} Creator`,
+          authorHandle: `@${platform}`,
+          avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          platform,
+          isLoginWalled: true,
+        };
+      }
+
       if (title || description) {
         const fullContent = description ? `${title}. ${description}` : title;
         // Clean HTML entities if any
@@ -209,6 +342,7 @@ async function extractWebOrSocialPost(url: string, platform: Platform): Promise<
           mediaUrl: image || undefined,
           platform,
           rawText: cleanContent,
+          isLoginWalled: false,
         };
       }
     }
@@ -242,6 +376,19 @@ async function extractWebOrSocialPost(url: string, platform: Platform): Promise<
           .trim()
           .slice(0, 1200);
 
+        // Check for login wall in Jina markdown output
+        if (isLoginWall(bodyContent, title)) {
+          return {
+            title: `${platform.toUpperCase()} Post (Login Required)`,
+            content: '',
+            authorName: `${platform.toUpperCase()} Creator`,
+            authorHandle: `@${platform}`,
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+            platform,
+            isLoginWalled: true,
+          };
+        }
+
         return {
           title,
           content: bodyContent.length > 30 ? bodyContent : title,
@@ -250,6 +397,7 @@ async function extractWebOrSocialPost(url: string, platform: Platform): Promise<
           avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
           platform,
           rawText: bodyContent,
+          isLoginWalled: false,
         };
       }
     }
@@ -271,12 +419,19 @@ export async function extractPostFromUrl(url: string): Promise<ExtractedPostData
 
   if (platform === 'twitter') {
     extracted = await extractTwitterPost(url);
+  } else if (platform === 'facebook') {
+    extracted = await extractFacebookPost(url);
   } else if (platform === 'youtube') {
     extracted = await extractYouTubePost(url);
   } else if (platform === 'reddit') {
     extracted = await extractRedditPost(url);
   } else {
     extracted = await extractWebOrSocialPost(url, platform);
+  }
+
+  // If the post is behind an authentication wall, return immediately
+  if (extracted?.isLoginWalled) {
+    return extracted;
   }
 
   if (extracted && extracted.content && extracted.content.trim().length > 10) {
@@ -303,5 +458,6 @@ export async function extractPostFromUrl(url: string): Promise<ExtractedPostData
     avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
     platform,
     rawText: title,
+    isLoginWalled: false,
   };
 }

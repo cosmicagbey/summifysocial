@@ -2,7 +2,7 @@ export type Platform = 'twitter' | 'facebook' | 'tiktok' | 'youtube' | 'reddit' 
 
 export type Category = 'tech' | 'sports' | 'entertainment' | 'politics' | 'business' | 'science';
 
-export type FactCheckStatus = 'verified' | 'unverified' | 'disputed' | 'misleading';
+export type FactCheckStatus = 'verified' | 'unverified' | 'disputed' | 'misleading' | 'opinion' | 'partially_true';
 
 export interface FactCheckEvidence {
   sourceName: string;
@@ -18,6 +18,12 @@ export interface FactCheckReport {
   accuracyScore: number; // 0-100
   status: FactCheckStatus;
   verdict: string;
+  verdictType?: 'true' | 'false' | 'partially_true' | 'opinion' | 'unverified';
+  claimBreakdown?: {
+    whatsTrue?: string;
+    whatsFalse?: string;
+    reason?: string;
+  };
   extractedClaim: string;
   analysis: string;
   evidence: FactCheckEvidence[];

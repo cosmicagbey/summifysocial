@@ -48,7 +48,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
   const handleVerify = useCallback(async (targetUrl?: string) => {
     const inputUrl = targetUrl || url;
     if (!inputUrl.trim()) {
-      setError('Please enter or paste a social media link.');
+      setError('Please enter or paste a social media link or post text.');
       return;
     }
 
@@ -165,6 +165,57 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
     return { bg: 'bg-rose-500/15', border: 'border-rose-500/30', text: 'text-rose-400', badge: 'bg-rose-500 text-white' };
   };
 
+  const getVerdictTheme = (status?: string, verdictType?: string) => {
+    if (verdictType === 'opinion' || status === 'opinion') {
+      return {
+        bg: 'bg-indigo-500/15',
+        border: 'border-indigo-500/30',
+        text: 'text-indigo-400',
+        badge: 'bg-indigo-500 text-white',
+        icon: '💬',
+        label: 'Personal Statement / Opinion',
+      };
+    }
+    if (verdictType === 'partially_true' || status === 'partially_true') {
+      return {
+        bg: 'bg-amber-500/15',
+        border: 'border-amber-500/30',
+        text: 'text-amber-400',
+        badge: 'bg-amber-500 text-slate-900',
+        icon: '⚠️',
+        label: 'Partially True (Needs Context)',
+      };
+    }
+    if (verdictType === 'false' || status === 'misleading' || status === 'disputed') {
+      return {
+        bg: 'bg-rose-500/15',
+        border: 'border-rose-500/30',
+        text: 'text-rose-400',
+        badge: 'bg-rose-500 text-white',
+        icon: '❌',
+        label: 'False / Debunked',
+      };
+    }
+    if (verdictType === 'true' || status === 'verified') {
+      return {
+        bg: 'bg-emerald-500/15',
+        border: 'border-emerald-500/30',
+        text: 'text-emerald-400',
+        badge: 'bg-emerald-500 text-white',
+        icon: '✅',
+        label: 'True / Verified',
+      };
+    }
+    return {
+      bg: 'bg-slate-800/40',
+      border: 'border-slate-700/60',
+      text: 'text-slate-300',
+      badge: 'bg-slate-700 text-white',
+      icon: '🔍',
+      label: 'Unverified Viral Claim',
+    };
+  };
+
   const handleClose = () => {
     if (typeof window !== 'undefined' && (window as any).AndroidBridge?.closePanel) {
       (window as any).AndroidBridge.closePanel();
@@ -234,7 +285,7 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
           {/* Quick Paste & Search Input - PINNED AT TOP */}
           <div className="p-3 bg-slate-950/90 border-b border-slate-800/80 flex-shrink-0 space-y-2">
             <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span className="truncate">Paste link from X, FB, TikTok, YouTube:</span>
+              <span className="truncate">Paste link or copied post text:</span>
               <button
                 type="button"
                 onClick={handlePasteClipboard}
@@ -248,8 +299,8 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
                 <input
-                  type="url"
-                  placeholder="https://x.com/... or youtube.com/..."
+                  type="text"
+                  placeholder="https://... or paste copied post text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleVerify()}
@@ -366,32 +417,63 @@ export const FloatingWindow: React.FC<FloatingWindowProps> = ({
                   </div>
                 )}
 
-                {/* 5. Real-Time Fact-Check & Accuracy Verdict */}
+                {/* 5. Real-Time Fact-Check & Accuracy Verdict (Grok-Style) */}
                 {(() => {
-                  const theme = getScoreTheme(result.factCheck.accuracyScore);
+                  const theme = getVerdictTheme(result.factCheck.status, result.factCheck.verdictType);
                   return (
-                    <div className={`p-3.5 rounded-xl border ${theme.bg} ${theme.border} space-y-2`}>
+                    <div className={`p-3.5 rounded-xl border ${theme.bg} ${theme.border} space-y-2.5 shadow-lg`}>
                       <div className="flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                            Fact-Check Verdict
-                          </span>
-                          <h5 className="text-xs font-bold text-white leading-tight">
-                            {result.factCheck.verdict}
-                          </h5>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">{theme.icon}</span>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block leading-tight">
+                              Verification Verdict
+                            </span>
+                            <h5 className={`text-xs font-bold ${theme.text} leading-tight`}>
+                              {result.factCheck.verdict}
+                            </h5>
+                          </div>
                         </div>
-                        <div className="flex flex-col items-center pl-2">
-                          <span className={`text-2xl font-black ${theme.text}`}>
-                            {result.factCheck.accuracyScore}%
-                          </span>
-                          <span className="text-[10px] text-slate-400">accuracy</span>
-                        </div>
+
+                        {result.factCheck.status !== 'opinion' && (
+                          <div className="flex flex-col items-end pl-2">
+                            <span className={`text-xl font-black ${theme.text}`}>
+                              {result.factCheck.accuracyScore}%
+                            </span>
+                            <span className="text-[9px] text-slate-400 leading-tight">confidence</span>
+                          </div>
+                        )}
                       </div>
 
+                      {/* Grok-style Explanation & Breakdown */}
                       {result.factCheck.analysis && (
-                        <p className="text-[11px] text-slate-300 leading-relaxed border-t border-slate-800/60 pt-2">
-                          {result.factCheck.analysis}
-                        </p>
+                        <div className="text-[11px] text-slate-200 leading-relaxed border-t border-slate-800/60 pt-2 space-y-2">
+                          <p>{result.factCheck.analysis}</p>
+
+                          {/* Breakdown of What's True vs What's False */}
+                          {result.factCheck.claimBreakdown && (
+                            <div className="space-y-1.5 pt-1">
+                              {result.factCheck.claimBreakdown.whatsTrue && (
+                                <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-300 flex items-start gap-1.5">
+                                  <span className="font-bold flex-shrink-0">✓ What's true:</span>
+                                  <span>{result.factCheck.claimBreakdown.whatsTrue}</span>
+                                </div>
+                              )}
+                              {result.factCheck.claimBreakdown.whatsFalse && (
+                                <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-[10px] text-rose-300 flex items-start gap-1.5">
+                                  <span className="font-bold flex-shrink-0">✗ What's false/unproven:</span>
+                                  <span>{result.factCheck.claimBreakdown.whatsFalse}</span>
+                                </div>
+                              )}
+                              {result.factCheck.claimBreakdown.reason && (
+                                <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800 text-[10px] text-slate-300 flex items-start gap-1.5">
+                                  <span className="font-bold text-slate-400 flex-shrink-0">💡 Key reason:</span>
+                                  <span>{result.factCheck.claimBreakdown.reason}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   );

@@ -31,6 +31,18 @@ export async function POST(request: NextRequest) {
     // 1. If a URL was provided, extract real live content from the target link
     if (url && url.trim().startsWith('http')) {
       const extracted = await extractPostFromUrl(url.trim());
+
+      if (extracted.isLoginWalled) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'This Facebook post requires a login to view (it may be private, restricted, or in a closed group). To verify it, please copy the text of the post and paste it here!',
+            isLoginWalled: true,
+          },
+          { status: 422 }
+        );
+      }
+
       platform = extracted.platform;
       postTitle = extracted.title;
       extractedContent = rawContent || extracted.content;
@@ -40,7 +52,19 @@ export async function POST(request: NextRequest) {
       mediaUrl = extracted.mediaUrl;
       publishedAt = extracted.publishedAt;
     } else {
-      platform = 'twitter';
+      // User pasted raw post text or claim instead of a URL
+      platform = 'rss';
+      extractedContent = rawContent || (url ? url.trim() : '');
+      postTitle = extractedContent.slice(0, 80);
+      authorName = 'Submitted Statement';
+      authorHandle = '@social_claim';
+    }
+
+    if (!extractedContent || !extractedContent.trim()) {
+      return NextResponse.json(
+        { success: false, error: 'Could not extract post content from this link. Please copy and paste the text of the post to verify it.' },
+        { status: 400 }
+      );
     }
 
     const category = detectCategory(extractedContent);
