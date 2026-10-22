@@ -39,16 +39,7 @@ jobs:
 
       - name: Build Signed Release APK
         working-directory: android
-        run: |
-          set +e
-          ./gradlew assembleRelease --stacktrace --no-daemon > build.log 2>&1
-          STATUS=$?
-          if [ $STATUS -ne 0 ]; then
-            echo "========== GRADLE BUILD FAILED =========="
-            tail -n 80 build.log
-            echo "========================================="
-            exit $STATUS
-          fi
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Prepare APK for Release
         run: |
