@@ -48,8 +48,8 @@ class FloatingBubbleService : Service() {
         private const val CHANNEL_ID = "floating_channel"
         private const val NOTIFICATION_ID = 1001
 
-        // Dev URL — change to production URL (e.g. https://summifysocial.app) for release builds
-        private const val BASE_URL = "http://10.0.2.2:3050/floating"
+        // Production URL — points to Vercel-hosted web app
+        private const val BASE_URL = "https://summifysocial.vercel.app/floating"
 
         // Idle delay before tucking & dimming down (matching Bypass 2.5s)
         private const val IDLE_DELAY_MS = 2500L

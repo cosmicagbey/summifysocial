@@ -30,3 +30,8 @@ android/.idea/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Temp build artifacts
+gradle-log.zip
+extracted_log/
+playstore/

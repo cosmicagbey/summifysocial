@@ -41,9 +41,8 @@ class MainActivity : ComponentActivity() {
 
   private var webView: WebView? = null
 
-  // Defaults to the local development server (10.0.2.2 maps to host PC localhost:3050 in Android emulator)
-  // For production release, replace with your hosted domain (e.g. https://summifysocial.app or https://summify-web.vercel.app)
-  private val appUrl = "http://10.0.2.2:3050"
+  // Production URL — points to Vercel-hosted web app
+  private val appUrl = "https://summifysocial.vercel.app"
 
   companion object {
     private const val OVERLAY_PERMISSION_REQUEST_CODE = 1234
